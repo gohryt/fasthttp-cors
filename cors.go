@@ -10,12 +10,12 @@ import (
 
 type (
 	CORSConfiguration struct {
-		Origins          []string
-		ExposeHeaders    *[]string
-		AllowMethods     *[]string
-		AllowHeaders     *[]string
-		MaxAge           *int
-		AllowCredentials *bool
+		Origins          []string  `json:"origins"`
+		ExposeHeaders    *[]string `json:"expose_headers"`
+		AllowMethods     *[]string `json:"allow_methods"`
+		AllowHeaders     *[]string `json:"allow_headers"`
+		AllowCredentials *bool     `json:"allow_credentials"`
+		MaxAge           *int      `json:"max_age"`
 	}
 
 	innerCORS struct {
@@ -69,11 +69,6 @@ func Prepare(configuration CORSConfiguration) innerCORS {
 		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlAllowHeaders, allowHeaders})
 	}
 
-	if configuration.MaxAge != nil {
-		maxAge := strconv.Itoa(*configuration.MaxAge)
-		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlMaxAge, maxAge})
-	}
-
 	if configuration.AllowCredentials != nil {
 		allowCredentials := "false"
 
@@ -82,6 +77,11 @@ func Prepare(configuration CORSConfiguration) innerCORS {
 		}
 
 		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlAllowCredentials, allowCredentials})
+	}
+
+	if configuration.MaxAge != nil {
+		maxAge := strconv.Itoa(*configuration.MaxAge)
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlMaxAge, maxAge})
 	}
 
 	return CORS
