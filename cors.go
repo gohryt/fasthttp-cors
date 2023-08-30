@@ -1,7 +1,7 @@
-package middlewares
+package CORS
 
 import (
-	"errors"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -10,83 +10,96 @@ import (
 
 type (
 	CORSConfiguration struct {
-		Origins, Methods, Headers []string
+		Origins          []string
+		ExposeHeaders    *[]string
+		AllowMethods     *[]string
+		AllowHeaders     *[]string
+		MaxAge           *int
+		AllowCredentials *bool
 	}
 
 	innerCORS struct {
-		origins, methods, headers []string
+		origin func(header *fasthttp.ResponseHeader) bool
+		header [][2]string
 	}
 )
 
-var ErrCORSOriginNotFound = errors.New("origin not found")
+func Prepare(configuration CORSConfiguration) innerCORS {
+	CORS := innerCORS{header: make([][2]string, 0, 5)}
 
-func CORS(configuration CORSConfiguration) *innerCORS {
-	CORS := &innerCORS{
-		methods: configuration.Methods,
-		headers: configuration.Headers,
+	if len(configuration.Origins) == 0 {
+		CORS.origin = func(header *fasthttp.ResponseHeader) bool {
+			header.Set(fasthttp.HeaderAccessControlAllowOrigin, "*")
+			return true
+		}
+	} else {
+		origins := make([]string, 0, (len(configuration.Origins) * 2))
+
+		for _, value := range configuration.Origins {
+			origins = append(origins, ("http://" + value), ("https://" + value))
+		}
+
+		CORS.origin = func(header *fasthttp.ResponseHeader) bool {
+			origin := header.Peek(fasthttp.HeaderOrigin)
+			originString := unsafe.String(unsafe.SliceData(origin), len(origin))
+
+			for _, value := range origins {
+				if value == originString {
+					header.Set(fasthttp.HeaderAccessControlAllowOrigin, originString)
+					return true
+				}
+			}
+
+			return false
+		}
 	}
 
-	for i := range configuration.Origins {
-		CORS.origins = append(CORS.origins, ("http://" + configuration.Origins[i]), ("https://" + configuration.Origins[i]))
+	if configuration.ExposeHeaders != nil {
+		exposeHeaders := strings.Join(*configuration.ExposeHeaders, ", ")
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlExposeHeaders, exposeHeaders})
+	}
+
+	if configuration.AllowMethods != nil {
+		allowMethods := strings.Join(*configuration.AllowMethods, ", ")
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlAllowMethods, allowMethods})
+	}
+
+	if configuration.AllowHeaders != nil {
+		allowHeaders := strings.Join(*configuration.AllowHeaders, ", ")
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlAllowHeaders, allowHeaders})
+	}
+
+	if configuration.MaxAge != nil {
+		maxAge := strconv.Itoa(*configuration.MaxAge)
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlMaxAge, maxAge})
+	}
+
+	if configuration.AllowCredentials != nil {
+		allowCredentials := "false"
+
+		if *configuration.AllowCredentials {
+			allowCredentials = "true"
+		}
+
+		CORS.header = append(CORS.header, [2]string{fasthttp.HeaderAccessControlAllowCredentials, allowCredentials})
 	}
 
 	return CORS
 }
 
-func (CORS *innerCORS) Handler(source fasthttp.RequestHandler) fasthttp.RequestHandler {
-	methods := "*"
+func (CORS innerCORS) Handler(source fasthttp.RequestHandler) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
+		header := &ctx.Response.Header
 
-	if len(CORS.methods) > 0 {
-		methods = strings.Join(CORS.methods, ",")
-	}
-
-	headers := "*"
-
-	if len(CORS.headers) > 0 {
-		headers = strings.Join(CORS.headers, ",")
-	}
-
-	if CORS.origins == nil {
-		return func(context *fasthttp.RequestCtx) {
-			header := &context.Response.Header
-
-			header.Set(fasthttp.HeaderAccessControlAllowOrigin, "*")
-			header.Set(fasthttp.HeaderAccessControlAllowMethods, methods)
-			header.Set(fasthttp.HeaderAccessControlAllowHeaders, headers)
-
-			if source != nil {
-				source(context)
-			}
-		}
-	}
-
-	return func(context *fasthttp.RequestCtx) {
-		header := &context.Response.Header
-
-		origin := context.Request.Header.Peek(fasthttp.HeaderOrigin)
-		originString := unsafe.String(unsafe.SliceData(origin), len(origin))
-
-		found := false
-
-		for i := range CORS.origins {
-			found = CORS.origins[i] == originString
-
-			if found != false {
-				header.Set(fasthttp.HeaderAccessControlAllowOrigin, originString)
-				break
-			}
+		origin := CORS.origin(header)
+		if !origin {
+			return
 		}
 
-		if found == false {
-			context.SetStatusCode(fasthttp.StatusBadRequest)
-			context.SetBodyString(ErrCORSOriginNotFound.Error())
-		} else {
-			header.Set(fasthttp.HeaderAccessControlAllowMethods, methods)
-			header.Set(fasthttp.HeaderAccessControlAllowHeaders, headers)
-
-			if source != nil {
-				source(context)
-			}
+		for _, value := range CORS.header {
+			header.Set(value[0], value[1])
 		}
+
+		source(ctx)
 	}
 }
