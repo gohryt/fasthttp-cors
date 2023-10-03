@@ -2,7 +2,7 @@ module github.com/gohryt/fasthttp-cors
 
 go 1.21.0
 
-require github.com/valyala/fasthttp v1.49.0
+require github.com/valyala/fasthttp v1.50.0
 
 require (
 	github.com/andybalholm/brotli v1.0.5 // indirect
